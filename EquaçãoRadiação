@@ -1,0 +1,52 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+i = 32 * (np.pi/180) 
+# Hr = 1
+Ic = 1357
+B = 0.14 #Varia de 0.14 à 0.21
+C = 0.058 #Varia de 0.058 até 0.135, Agosto ==> Inverno no Irão
+S = 37 * (np.pi/180)
+krTeta = 0.2
+DiaDoAno = 220 #Agosto ==> 210 - 240
+
+def eq_delta():
+    return (23.45*np.sin((360 * (284 + DiaDoAno)/365)*np.pi/180))*np.pi/180
+
+def eq_Beta(Hr):
+    return np.arcsin(np.cos(i) * np.cos(Hr) * np.cos(eq_delta()) + np.sin(i) * np.sin(eq_delta())) #arcsin entrega o angulo em rad
+
+def eq_Idn(Hr):
+    return Ic*np.exp((-1)*B/np.sin(eq_Beta(Hr)))
+
+def eq_Fss():
+    return (1 + np.cos(S))/2
+
+def eq_IdTeta(Hr):
+    return C * eq_Idn(Hr) * eq_Fss()
+
+def eq_Fsg():
+    return (1 - np.cos(S))/2
+
+def eq_IrTeta(Hr):
+    return (eq_Idn(Hr) + eq_IdTeta(Hr)) * krTeta * eq_Fsg()
+    
+def eq_phi(Hr):
+    return np.arcsin(np.cos(eq_delta()) * np.sin(Hr) / np.cos(eq_Beta(Hr)))
+
+def eq_Teta(Hr):
+    return np.arccos(np.cos(eq_Beta(Hr)) * np.cos(eq_phi(Hr)) * np.sin(S) + np.sin(eq_Beta(Hr)) * np.cos(S))
+    
+def eq_It(Hr):
+    return eq_Idn(Hr)*np.cos(eq_Teta(Hr)) + eq_IrTeta(Hr) + eq_IdTeta(Hr)
+
+fig, ax = plt.subplots()
+
+x = np.linspace(-60, 60, num=120) #Cada hora é multiplicada por 15 para obter grau
+y = eq_It(x*np.pi/180)
+
+ax.plot(x, y, linewidth=2.0)
+ax.set(xlim=(-100, 100 ), xticks=np.arange(-100, 100, 10),
+       ylim=(500, 1200), yticks=np.arange(500, 1500, 100))
+
+plt.show()
