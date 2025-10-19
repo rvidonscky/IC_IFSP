@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 i = 32 * (np.pi/180) 
 # Hr = 1
 Ic = 1357
-B = 0.14 #Varia de 0.14 à 0.21
-C = 0.058 #Varia de 0.058 até 0.135, Agosto ==> Inverno no Irão
+B = 0.21 #Varia de 0.14 à 0.21
+C = 0.135 #Varia de 0.058 até 0.135, Agosto ==> Verão no Irão
 S = 37 * (np.pi/180)
 krTeta = 0.2
 DiaDoAno = 220 #Agosto ==> 210 - 240
