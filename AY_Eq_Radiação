@@ -39,3 +39,22 @@ def direct_radiation(Ic, B, sinb):
         return 0.0
     return Ic * math.exp(-B / sinb)
 
+# RADIAÇÃO DIFUSA ---------------------------------------------------------------------------------------------------------------------
+
+# da eq 5:FSS = (1 + cos(S)) / 2
+# tilt_deg: inclinação S do coletor, em graus.
+# retorna valor entre 0 e 1
+def FSS(tilt_deg):
+    S = deg2rad(tilt_deg)
+    return (1.0 + math.cos(S)) / 2.0
+
+# o C poderia variar de 0.058 ate 0.135, aparentemente foi usado o segundo no artigo, então decidi manter esse fixo por enquanto
+# eq 4: Idq = C * IDN * FSS
+def diffuse_radiation(IDN, tilt_deg):
+    C = 0.135
+    fss = FSS(tilt_deg)
+    Idq = C * IDN * fss
+    return Idq
+
+# RADIAÇÃO REFLETIDA ---------------------------------------------------------------------------------------------------------------------
+
