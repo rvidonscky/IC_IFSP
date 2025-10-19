@@ -1,0 +1,41 @@
+# RADIAÇÃO DIRETA ---------------------------------------------------------------------------------------------------------------------
+
+import math
+
+# conversões úteis:
+def deg2rad(x):
+    return x * math.pi / 180.0
+
+def rad2deg(x):
+    return x * 180.0 / math.pi
+
+# declinação solar, em radianos, depende do dia do ano n
+# veio da equação 3, e vai ser aplicado pra encontrar o seno de beta por enquanto, na eq 2
+# δ = 23.45° * sin( 360° * (284 + n) / 365 )
+def SolarDeclination(day_of_year):
+    deg = 23.45 * math.sin(deg2rad(360.0 * (284 + day_of_year) / 365.0))
+    return deg2rad(deg)
+
+# ângulo horário - definido no texto abaixo da eq 2 -
+# converte hora do dia pra ângulo horário em rad
+# H_r = (hora_local - 12) * 15°  (15° por hora)
+def hour_angle(hora_decimal):
+    return deg2rad((hora_decimal - 12.0) * 15.0)
+
+# seno do ângulo de altitude solar beta, da eq 2
+# sin(b) = sin(i)*sin(δ) + cos(i)*cos(δ)*cos(H_r)
+# Retorna valor entre -1 e +1; se <=0 indica Sol abaixo do horizonte
+def sin_solar_altitude(latitude_deg, decl_rad, hour_ang_rad):
+    i = deg2rad(latitude_deg)
+    return math.sin(i) * math.sin(decl_rad) + math.cos(i) * math.cos(decl_rad) * math.cos(hour_ang_rad)
+
+# radiação direta
+# I_DN = I_c * exp( - B / sin(b) )
+# só faz sentido quando sin(b) > 0 (sol acima do horizonte) 
+# Ic é a constante solar, no artigo usam 1357 W*m^-2
+# o B no artigo usa: 0.14 inverno a 0.21 verão, pelo visto é constante no dia
+def direct_radiation(Ic, B, sinb):
+    if sinb <= 0.0:
+        return 0.0
+    return Ic * math.exp(-B / sinb)
+
