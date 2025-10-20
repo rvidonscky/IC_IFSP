@@ -56,5 +56,24 @@ def diffuse_radiation(IDN, tilt_deg):
     Idq = C * IDN * fss
     return Idq
 
-# RADIAÇÃO REFLETIDA ---------------------------------------------------------------------------------------------------------------------
+# RADIAÇÃO REFLETIDA ----------------------------------------------------------------------------------------------------------------
+
+# se ele está plano, o S vai ser 0, se for vertical, o S é 90 graus
+# da eq 7: Fsg = (1 - cos(S)) / 2
+# tilt_deg: inclinação S do coletor, em graus
+def Fsg(tilt_deg):
+    S = deg2rad(tilt_deg)
+    return (1.0 - math.cos(S)) / 2.0
+
+# eq 6: Irq = (IDN + Idq) * krq * Fsg
+# krq é o coeficiente de reflexão do ambiente, o artigo usa 0.2 (pela vegetaçao)
+def reflected_radiation(IDN, Idq, tilt_deg):
+    krq = 0.2
+    fsg = Fsg(tilt_deg)
+    Irq = (IDN + Idq) * krq * fsg
+    return Irq
+
+# RADIAÇÃO TOTAL ----------------------------------------------------------------------------------------------------------------------
+
+
 
