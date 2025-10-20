@@ -11,7 +11,12 @@ krTeta = 0.2
 DiaDoAno = 220 #Agosto ==> 210 - 240
 
 def eq_delta():
-    return (23.45*np.sin((360 * (284 + DiaDoAno)/365)*np.pi/180))*np.pi/180
+    anguloGrau = 360 * (284 + DiaDoAno)/365
+    anguloRad = anguloGrau * (np.pi/180)
+    valSeno = np.sin(anguloRad)
+    deltaGrau = valSeno * 23.45
+    deltaRad = deltaGrau * (np.pi/180)
+    return deltaRad
 
 def eq_Beta(Hr):
     return np.arcsin(np.cos(i) * np.cos(Hr) * np.cos(eq_delta()) + np.sin(i) * np.sin(eq_delta())) #arcsin entrega o angulo em rad
