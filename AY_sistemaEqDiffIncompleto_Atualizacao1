@@ -59,9 +59,9 @@ TemperaturaCeu = 0.0552*(TemperaturaAmbiente**1.5)
 # MODIFICADO (CoolProp precisa da pressão, tava faltando isso antes)
 # E ele precisa de temperatura de referência, em Kelvin:
 T_ref = 300.0
-viscosidadeDinamica = CP.PropsSI("V", "T", TemperaturaAr, "P", P_atm, "Air")
-calorEspecifico = CP.PropsSI("CPMASS", "T", TemperaturaAr, "P", P_atm, "Air")
-condutividadeTermica = CP.PropsSI("CONDUCTIVITY", "T", TemperaturaAr, "P", P_atm, "Air")
+viscosidadeDinamica = CP.PropsSI("V", "T", T_ref, "P", P_atm, "Air")
+calorEspecifico = CP.PropsSI("CPMASS", "T", T_ref, "P", P_atm, "Air")
+condutividadeTermica = CP.PropsSI("CONDUCTIVITY", "T", T_ref, "P", P_atm, "Air")
 
 
 """
