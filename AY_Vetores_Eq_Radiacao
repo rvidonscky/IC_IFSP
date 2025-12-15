@@ -1,0 +1,146 @@
+# RADIAÇÃO DIRETA ---------------------------------------------------------------------------------------------------------------------
+
+import math
+
+# conversões úteis:
+def deg2rad(x):
+    return x * math.pi / 180.0
+
+def rad2deg(x):
+    return x * 180.0 / math.pi
+
+# declinação solar, em radianos, depende do dia do ano n
+# veio da equação 3, e vai ser aplicado pra encontrar o seno de beta por enquanto, na eq 2
+# δ = 23.45° * sin( 360° * (284 + n) / 365 )
+def SolarDeclination(day_of_year):
+    deg = 23.45 * math.sin(deg2rad(360.0 * (284 + day_of_year) / 365.0))
+    return deg2rad(deg)
+
+# ângulo horário - definido no texto abaixo da eq 2 -
+# converte hora do dia pra ângulo horário em rad
+# H_r = (hora_local - 12) * 15°  (15° por hora)
+def hour_angle(hora_decimal):
+    return deg2rad((hora_decimal - 12.0) * 15.0)
+
+# seno do ângulo de altitude solar beta, da eq 2
+# sin(b) = sin(i)*sin(δ) + cos(i)*cos(δ)*cos(H_r)
+# Retorna valor entre -1 e +1; se <=0 indica Sol abaixo do horizonte
+def sin_solar_altitude(latitude_deg, decl_rad, hour_ang_rad):
+    i = deg2rad(latitude_deg)
+    return math.sin(i) * math.sin(decl_rad) + math.cos(i) * math.cos(decl_rad) * math.cos(hour_ang_rad)
+
+# radiação direta
+# I_DN = I_c * exp( - B / sin(b) )
+# só faz sentido quando sin(b) > 0 (sol acima do horizonte)
+# Ic é a constante solar, no artigo usam 1357 W*m^-2
+# o B no artigo usa: 0.14 inverno a 0.21 verão, pelo visto é constante no dia
+def direct_radiation(Ic, B, sinb):
+    if sinb <= 0.0:
+        return 0.0
+    return Ic * math.exp(-B / sinb)
+
+# RADIAÇÃO DIFUSA ---------------------------------------------------------------------------------------------------------------------
+
+# da eq 5:FSS = (1 + cos(S)) / 2
+# tilt_deg: inclinação S do coletor, em graus.
+# retorna valor entre 0 e 1
+def FSS(tilt_deg):
+    S = deg2rad(tilt_deg)
+    return (1.0 + math.cos(S)) / 2.0
+
+# o C poderia variar de 0.058 ate 0.135, aparentemente foi usado o segundo no artigo, então decidi manter esse fixo por enquanto
+# eq 4: Idq = C * IDN * FSS
+def diffuse_radiation(IDN, tilt_deg):
+    C = 0.135
+    fss = FSS(tilt_deg)
+    Idq = C * IDN * fss
+    return Idq
+
+# RADIAÇÃO REFLETIDA ----------------------------------------------------------------------------------------------------------------
+
+# se ele está plano, o S vai ser 0, se for vertical, o S é 90 graus
+# da eq 7: Fsg = (1 - cos(S)) / 2
+# tilt_deg: inclinação S do coletor, em graus
+def Fsg(tilt_deg):
+    S = deg2rad(tilt_deg)
+    return (1.0 - math.cos(S)) / 2.0
+
+# eq 6: Irq = (IDN + Idq) * krq * Fsg
+# krq é o coeficiente de reflexão do ambiente, o artigo usa 0.2 (pela vegetaçao)
+def reflected_radiation(IDN, Idq, tilt_deg):
+    krq = 0.2
+    fsg = Fsg(tilt_deg)
+    Irq = (IDN + Idq) * krq * fsg
+    return Irq
+
+# RADIAÇÃO TOTAL ----------------------------------------------------------------------------------------------------------------------
+
+import matplotlib.pyplot as plt
+
+# Função para calcular o cosseno do ângulo de incidência via vetores
+# O vetor do Sol (s) e o vetor normal do painel (n) são definidos em coordenadas locais
+def cos_incidence_vector(latitude_deg, decl_rad, tilt_deg, hour_ang_rad):
+    i = deg2rad(latitude_deg)
+    S = deg2rad(tilt_deg)
+    
+    # Vetor do Sol (direção da radiação)
+    # Componentes conforme geometria solar padrão:
+    # x (sul), y (leste), z (vertical)
+    sx = math.cos(decl_rad) * math.sin(hour_ang_rad)
+    sy = -math.cos(decl_rad) * math.sin(i) * math.cos(hour_ang_rad) + math.sin(decl_rad) * math.cos(i)
+    sz = math.cos(decl_rad) * math.cos(i) * math.cos(hour_ang_rad) + math.sin(decl_rad) * math.sin(i)
+
+    # Vetor normal do painel inclinado voltado para o sul
+    nx = math.sin(S)
+    ny = 0.0
+    nz = math.cos(S)
+
+    # Produto escalar: cos(q) = s · n / (|s||n|)  (ambos unitários → |s|=|n|=1)
+    cosq = sx * nx + sy * ny + sz * nz
+    return cosq
+
+# Radiação total (Eq. 8)
+def total_radiation(IDN, Idq, Irq, cosq):
+    if cosq < 0:
+        cosq = 0.0  # sol atrás da superfície
+    return IDN * cosq + Idq + Irq
+
+
+# ----------------------------------------------------------------------------------------------
+# PARÂMETROS FIXOS DO ARTIGO (caso de verao, agosto)
+Ic = 1357          # constante solar (W/m²)
+latitude_deg = 32  # latitude do local (Irã)
+tilt_deg = 37      # inclinação do coletor
+B = 0.21           # coeficiente atmosférico de verão
+day_of_year = 200  # agosto (verão)
+# ----------------------------------------------------------------------------------------------
+
+# CÁLCULOS HORA A HORA (com passo menor pra suavizar)
+horas = [h for h in [x * 0.25 for x in range(24 * 4)]]  # 0h até 23.75h, a cada 15 min
+It_values = []
+horas_solares = []  # só para as horas em que há sol (sinb > 0)
+
+decl_rad = SolarDeclination(day_of_year)
+
+for hora in horas:
+    Hr = hour_angle(hora)
+    sinb = sin_solar_altitude(latitude_deg, decl_rad, Hr)
+    if sinb <= 0:
+        continue  # pula horas noturnas
+    
+    IDN = direct_radiation(Ic, B, sinb)
+    Idq = diffuse_radiation(IDN, tilt_deg)
+    Irq = reflected_radiation(IDN, Idq, tilt_deg)
+    cosq = cos_incidence_vector(latitude_deg, decl_rad, tilt_deg, Hr)
+    It = total_radiation(IDN, Idq, Irq, cosq)
+    
+    It_values.append(It)
+    horas_solares.append(hora)
+
+# ----------------------------------------------------------------------------------------------
+# PLOT DO GRÁFICO FINAL (como o do artigo)
+plt.figure(figsize=(8,5))
+plt.plot(horas_solares, It_values, color='orange', linewidth=2)
+plt.grid(True)
+plt.tight_layout()
+plt.show()
