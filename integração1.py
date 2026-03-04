@@ -51,7 +51,7 @@ time_range = TimeAxis(start=t0,stop=tn,num=nt+1)
 
 # Discretização da malha
 nx = 50  # Número de pontos ao longo de x
-nz = 5   # Número de pontos ao longo de z (resulta em passos de 1mm: 0, 1, 2, 3, 4)
+nz = 15   # Número de pontos ao longo de z (resulta em passos de 1mm: 0, 1, 2, 3, 4). eu expandi o número de divisões em z para possívelmente maior precisão em malha
 
 """
 # Grid
@@ -143,10 +143,10 @@ h_rpg = TimeFunction(name='h_rpg', grid=grid, dimensions=(grid.time_dim, x), sha
 h_rpsky = TimeFunction(name='h_rpsky', grid=grid, dimensions=(grid.time_dim, x), shape=(nt+1, nx))
 
 #Condição inicial (eq. 16) considerando T0 = 35°C
-TemperaturaVidro.data_with_halo[0,:,:] = 308.15
-TemperaturaPlaca.data_with_halo[0,:] = 308.15
+TemperaturaVidro.data_with_halo[:] = 308.15
+TemperaturaPlaca.data_with_halo[:] = 308.15
 TemperaturaAmbiente.data_with_halo[:] = 308.15          #Problema?
-TemperaturaAr.data_with_halo[0,:] = 308.15
+TemperaturaAr.data_with_halo[:] = 308.15
 
 # Termos dependentes das temperaturas
 T_ref = 308.15
@@ -170,10 +170,25 @@ h_gam = Nu_gam * k_a / L
 
 # Equações Diferenciais
 
+
+eq11 = Eq(TemperaturaVidro.dt,
+          (k_g/(C_g*ro_g)) * (-2*TemperaturaVidro[t, x, z] + TemperaturaVidro[t,x,z+1] + TemperaturaVidro[t,x,z-1])/dz
+          + It_func*alpha_g/(ro_g*C_g*delta_g))
+
+#PROBLEMA É O DZ2, irrelevante se foram adicionadas ou não as condições de contorno
+
+#Equações comentadas abaixo a serem apagadas
+"""
 eq11 = Eq(TemperaturaVidro.dt,
           It_func*alpha_g/(ro_g*C_g*delta_g)
           + h_gam*(TemperaturaAmbiente - TemperaturaVidro)/(ro_g*C_g*delta_g)
-          + h_ga*(TemperaturaAmbiente - TemperaturaVidro)/(ro_g*C_g*delta_g))
+          - h_ga*(TemperaturaAmbiente - TemperaturaVidro)/(ro_g*C_g*delta_g))
+
+"""
+"""
+eq_11 = Eq(TemperaturaVidro.forward,
+           TemperaturaVidro + grid.stepping_dim.spacing * ((k_g / (ro_g * C_g)) * TemperaturaVidro.dz2 + It_func*alpha_g/(ro_g*C_g*delta_g)))
+"""
 
 eq12 = Eq(TemperaturaPlaca.dt,
           It_func*tau_g*alpha_p/(ro_p*C_p*l_p)
@@ -222,11 +237,11 @@ eq_18 = Eq(TemperaturaVidro[t+1, x, z + 1],
 nrec = 1
 rec_T = Receiver(name="rec_T", grid=grid, npoint=nrec, time_range=time_range)
 rec_T.coordinates.data[:, 0] = L
-rec_T.coordinates.data[:, 1] = dz # Coluna 1 é a coordenada de z (Ex: 0.0, interface com o ar)
+rec_T.coordinates.data[:, 1] = -1*dz # Tomar cuidado porque é bem deslizante onde é e onde não é fora da placa
 rec_term = rec_T.interpolate(expr=TemperaturaVidro)
 
 #Operador
-op = Operator([eq_1,eq_2, eq_3,
+op = Operator([eq_1, eq_2, eq_3,
               eq_entradaAr, eq_17, eq_18,
               eq_rpsky, eq_rpg, eqCeu,] + rec_term)
 
@@ -239,7 +254,7 @@ plt.rc('font' , family='serif')
 plt.rc('xtick', labelsize=20)
 plt.rc('ytick', labelsize=20)
 
-plt.plot(time_range.time_values[:-100], rec_T.data[:-100], label=f"Receiver")
+plt.plot(time_range.time_values[:-1], rec_T.data[:-1], label=f"Receiver")
 plt.xlabel("Time (s)")
 plt.ylabel("Temperature (K)")
 plt.title("Receiver Data")
