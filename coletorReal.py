@@ -1,0 +1,321 @@
+import math
+import numpy as np
+
+def deg2rad(x): return x * math.pi / 180.0
+def rad2deg(x): return x * 180.0 / math.pi
+
+def SolarDeclination(day_of_year):
+    deg = 23.45 * math.sin(deg2rad(360.0 * (284 + day_of_year) / 365.0))
+    return deg2rad(deg)
+
+def hour_angle(hora_decimal):
+    return deg2rad((hora_decimal - 12.5) * 17.5)
+
+def solar_altitude(latitude_deg, decl_rad, hour_ang_rad):
+    i = deg2rad(latitude_deg)
+    return math.asin(math.sin(i) * math.sin(decl_rad) + math.cos(i) * math.cos(decl_rad) * math.cos(hour_ang_rad))
+
+def direct_radiation(Ic, B, sinb):
+    if sinb <= 0.0: return 0.0
+    return Ic * math.exp(-B / sinb)
+
+def FSS(tilt_deg):
+    S = deg2rad(tilt_deg)
+    return (1.0 + math.cos(S)) / 2.0
+
+def diffuse_radiation(IDN, tilt_deg):
+    C = 0.135
+    return C * IDN * FSS(tilt_deg)
+
+def Fsg(tilt_deg):
+    S = deg2rad(tilt_deg)
+    return (1.0 - math.cos(S)) / 2.0
+
+def reflected_radiation(IDN, Idq, tilt_deg):
+    krq = 0.2
+    return (IDN + Idq) * krq * Fsg(tilt_deg)
+
+def cos_incidence_vector(latitude_deg, decl_rad, tilt_deg, hr, b):
+
+    i = deg2rad(latitude_deg)
+    S = deg2rad(tilt_deg)
+
+    Azimute = math.asin(math.cos(decl_rad) * math.sin(hr) / math.cos(b))
+    cosq = math.cos(b) * math.cos(Azimute) * math.sin(S) + math.sin(b) * math.cos(S)
+    return cosq
+
+def total_radiation(IDN, Idq, Irq, cosq):
+    return IDN * cosq + Idq + Irq
+
+def compute_It_series(time_seconds,
+                      latitude_deg=32,
+                      tilt_deg=37,
+                      day_of_year=200,
+                      Ic=1357.0,
+                      B=0.21):
+
+    times = np.asarray(time_seconds)
+    # converte os segundos para hora decimal (0-24) por exemplo, 43200 segundos vira 12
+    hours = (times / 3600.0)  # 0..24
+    decl = SolarDeclination(day_of_year)
+    It_series = np.zeros_like(hours)
+
+    for idx, h in enumerate(hours):
+        # se estiver fora do intervalo do dia o sinb dará <=0 e já retorna 0
+        Hr = hour_angle(h)
+        b = solar_altitude(latitude_deg, decl, Hr)
+
+        IDN = direct_radiation(Ic, B, b)
+        Idq = diffuse_radiation(IDN, tilt_deg)
+        Irq = reflected_radiation(IDN, Idq, tilt_deg)
+        cosq = cos_incidence_vector(latitude_deg, decl, tilt_deg, Hr, b)
+        It = total_radiation(IDN, Idq, Irq, cosq)
+        It_series[idx] = It
+
+    return It_series
+
+import CoolProp.CoolProp as CP
+import numpy as np
+from devito import *
+
+import matplotlib.pyplot       as plt
+import matplotlib.ticker       as mticker
+from   mpl_toolkits.axes_grid1 import make_axes_locatable
+from   matplotlib              import cm
+from   matplotlib              import ticker
+
+# Coeficientes
+i = 32 * np.pi/180  #Latitude
+S = 37 * np.pi/180  #Angulo do coletor
+n = 200   #Dia do ano
+k_g = 5.9 #Condutividade Térmica do Vidro
+C_g = 753 #Calor específico do vidro
+ro_g = 2466  #Densidade do Vidro
+delta_g = 4e-3  #Espessura do vidro
+l_p = 2 #Largura do Vidro
+ro_a = 1.09 #Densidade do ar
+k_a = 0.025 #Condutividade do ar
+C_a = 1005  #Calor específico do ar
+alpha_g = 0.1 #Coeficiente de absorção do ar
+alpha_p = 0.96  #Coeficiente de absorção da placa
+tau_g = 0.8 #Coeficiente transiente do vidro
+C_p = 900 #Calor específico da placa
+ro_w = 1000 #Densidade da água
+L = 2 #Largura do coletor
+b = 1 #Comprimento do coletor
+ro_d = 960 #Densidade do material seco
+a = 0.1 #Altura do duto coletor
+k_p = 250 #Condutividade térmica da placa
+M_0 = 3.5 #Conteúdo úmido inicial
+sigma = 5.57e-8
+A_C = b * L #Área do coletor
+epslon_p = 1 #Emitancia, como é um corpo negro, é 1
+ro_p = 2700 #Densidade da placa (alumínio)
+P_atm = 101325 #Pressão atmosférica (Pa)
+
+VelocidadeAr = 0.1468 #Pode ser alterada
+
+# time grid
+from examples.seismic.source import Receiver, TimeAxis
+t0 = 0 + 60 * 60 * 9
+tn =  60 * 60 * 8/10 + 60 * 60 * 9
+dt = 0.001                     #Devido ao número de Courant, para o sistema entregar valores estável o dt deve estar em um intervalo ótimo
+nt = int((tn-t0)/dt)
+
+time_range = TimeAxis(start=t0,stop=tn,num=nt+1)
+
+# Discretização da malha
+nx = 50  # Número de pontos ao longo de x
+nz = 5   # Número de pontos ao longo de z (resulta em passos de 1mm: 0, 1, 2, 3, 4)
+
+#Utilização de subdomínios para resolver as condições de contorno
+#z = 0
+class Topo(SubDomain):
+    name = 'topo'
+    def define(self, dimensions):
+        x, z = dimensions
+        return {x: x, z: ('left', 1)} # 'left' indica o início de z, espessura de 1 nó
+
+#z=z.max
+class Fundo(SubDomain):
+    name = 'fundo'
+    def define(self, dimensions):
+        x, z = dimensions
+        return {x: x, z: ('right', 1)}
+
+class Meio(SubDomain):
+    name = 'meio'
+    def define(self, dimensions):
+        x, z = dimensions
+        # ('middle', 1, 1) significa: pegue o meio, pulando 1 nó no começo e 1 nó no final
+        return {x: x, z: ('middle', 1, 1)}
+
+#grid2D
+x = SpaceDimension(name='x') #Na lógica do Devito, o segundo termo do "Grid" é internamente chamado de "y" irrelevante do que você escrever
+z = SpaceDimension(name='z') #Utilizar SpaceDimension resolve este problema
+
+grid = Grid(shape=(nx, nz), extent=(L, delta_g), dimensions=(x,z))
+t = grid.stepping_dim
+dx, dz = grid.spacing
+
+# Instanciando os subdomínios
+topo = Topo(grid=grid)
+fundo = Fundo(grid=grid)
+meio = Meio(grid=grid)
+
+# Temperaturas
+TemperaturaVidro = TimeFunction(name='T_g',
+                                grid=grid,
+                                dimensions=(grid.time_dim, x, z),
+                                save=nt+1, shape=(nt+1, nx, nz),
+                                space_order=2)
+
+TemperaturaPlaca = TimeFunction(name='T_p',
+                                grid=grid,
+                                dimensions=(grid.time_dim, x),
+                                save=nt+1, shape=(nt+1, nx),
+                                space_order=2)
+
+TemperaturaAr = TimeFunction(name='T_a', grid=grid,
+                             dimensions=(grid.time_dim, x),
+                             save=nt+1, shape=(nt+1, nx),
+                             space_order=1)
+
+TemperaturaAmbiente = TimeFunction(name='T_am',                                 #Alteração na função de temperatura para
+                                   grid=grid, dimensions=(grid.time_dim,),      #uma função que possui somente dimensão temporal
+                                   save=nt+1, shape=(nt+1,),
+                                   time_order=1)
+
+TemperaturaCeu = TimeFunction(name='T_ceu',                                 #Alteração na função de temperatura para
+                              grid=grid, dimensions=(grid.time_dim,),      #uma função que possui somente dimensão temporal
+                              save=nt+1, shape=(nt+1,),
+                              time_order=1)
+
+deltaZ = TimeFunction(name='dZ',
+                  grid=grid,
+                  dimensions=(grid.time_dim, x, z),
+                  save=nt+1, shape=(nt+1, nx, nz),
+                  space_order=2)
+
+deltaZ.data_with_halo[:] = 0
+
+eqDerivada = Eq(deltaZ.forward, TemperaturaVidro.dz.subs(t, t+1))
+
+eqCeu = Eq(TemperaturaCeu[t+1], 0.0552*pow(TemperaturaAmbiente[t+1], 1.5)) #Passagem de TemperaturaCeu para ser resolvido pelo operador
+
+#Função Radiação
+It_func = TimeFunction(name='It',
+                       grid=grid,
+                       dimensions=(grid.time_dim, x),
+                       shape=(nt+1, nx),
+                       save=nt+1)
+It_series = compute_It_series(time_range.time_values)
+It_func.data[:, :] = It_series[:, np.newaxis]
+
+#Fatores Transferencias de calor dependentes das temperaturas
+h_rpg = TimeFunction(name='h_rpg', grid=grid, dimensions=(grid.time_dim, x), shape=(nt+1, nx), space_order=1)
+h_rpsky = TimeFunction(name='h_rpsky', grid=grid, dimensions=(grid.time_dim, x), shape=(nt+1, nx))
+
+#Condição inicial (eq. 16) considerando T0 = 35°C
+TemperaturaVidro.data_with_halo[:] = 308.15
+TemperaturaPlaca.data_with_halo[:] = 308.15
+TemperaturaAmbiente.data_with_halo[:] = 308.15
+TemperaturaAr.data_with_halo[:] = 308.15
+
+# Termos dependentes das temperaturas
+T_ref = 308.15
+viscosidadeDinamica = CP.PropsSI("V", "T", T_ref, "P", P_atm, "Air")
+calorEspecifico = CP.PropsSI("CPMASS", "T", T_ref, "P", P_atm, "Air")
+condutividadeTermica = CP.PropsSI("CONDUCTIVITY", "T", T_ref, "P", P_atm, "Air")
+
+#Cálculo dos termos de Tranfêrencia de Calor
+Re = ro_a * VelocidadeAr * L / viscosidadeDinamica
+Pr = calorEspecifico * viscosidadeDinamica / condutividadeTermica
+if Re * Pr * a/L > 70:
+    Nu = 7.6
+else:
+    Nu = 1.85 * pow(Re * Pr * a / L, 1/3)
+
+h_ga = Nu * k_a / L
+h_pa = h_ga
+
+Nu_gam = 0.86 * pow(Re, 0.5) * pow(Pr, 1/3)
+h_gam = Nu_gam * k_a / L
+
+# Equações Diferenciais
+
+eq11 = Eq(TemperaturaVidro.dt,
+          (k_g/(C_g*ro_g)) * deltaZ.dz #(-2*TemperaturaVidro[t, x, z] + TemperaturaVidro[t,x,z+1] + TemperaturaVidro[t,x,z-1])/(6.4e-7)
+          + It_func*alpha_g/(ro_g*C_g*delta_g))
+
+eq12 = Eq(TemperaturaPlaca.dt,
+          It_func*tau_g*alpha_p/(ro_p*C_p*l_p)
+          + (h_pa/(ro_p*C_p*l_p))*(TemperaturaAr - TemperaturaPlaca)
+          - (h_rpsky/(ro_p*C_p*l_p)) * (TemperaturaPlaca - TemperaturaCeu)
+          - (h_rpg/(ro_p*C_p*l_p)) * (TemperaturaPlaca - TemperaturaVidro.subs(z, 0))) #Utiliza-se .subs() pis este é um termo de convecção entre ar e placa e a transferencia ocorre somente naquela espessuara do vidro
+
+eq13 = Eq(TemperaturaAr.dt,
+          (-1) * VelocidadeAr * TemperaturaAr.dxl
+          + (h_ga*b/(ro_a*C_a*A_C))*(TemperaturaVidro.subs(z, 0) - TemperaturaAr)
+          + (h_pa*b/(ro_p*C_p*A_C))*(TemperaturaPlaca - TemperaturaAr))
+
+eq_1 = Eq(TemperaturaVidro.forward,
+          solve(eq11, TemperaturaVidro.forward))
+
+eq_2 = Eq(TemperaturaPlaca.forward,
+          solve(eq12, TemperaturaPlaca.forward))
+
+eq_3 = Eq(TemperaturaAr.forward,
+          solve(eq13, TemperaturaAr.forward))
+
+#Equações dos coeficientes de transf. de calor
+eq_rpsky = Eq(h_rpsky.forward,
+              sigma * (TemperaturaPlaca**2 + TemperaturaCeu**2)
+              * (TemperaturaPlaca + TemperaturaCeu)
+              / (1/epslon_p + 1/tau_g - 1))
+
+eq_rpg = Eq(h_rpg.forward,
+            sigma * (TemperaturaPlaca**2 + TemperaturaVidro.subs(z, 0)**2)
+            * (TemperaturaPlaca + TemperaturaVidro.subs(z, 0))
+            / (1/epslon_p + 1/tau_g - 1))
+
+#Condições de contorno
+eq_entradaAr = Eq(TemperaturaAr.forward.subs(x, 0),                             #A função subs diz onde eu quero
+                TemperaturaAmbiente)                                            #que a igualdade seja válida
+
+eq_17 = Eq(TemperaturaVidro[t+1, x, z - 1],
+          TemperaturaVidro[t+1, x, z + 1] - (2 * dz * h_ga / k_g) * (TemperaturaVidro[t+1, x, z] - TemperaturaAr),
+          subdomain=topo)                                   #Mandando as eqs de contorno funcionarem somente nas bordas
+
+eq_18 = Eq(TemperaturaVidro[t+1, x, z + 1],
+          TemperaturaVidro[t+1, x, z - 1] + (2 * dz * h_gam / k_g) * (TemperaturaAmbiente - TemperaturaVidro[t+1, x, z]),
+          subdomain=fundo)
+
+#Recebedor
+nrec = 1
+rec_T = Receiver(name="rec_T", grid=grid, npoint=nrec, time_range=time_range)
+rec_T.coordinates.data[:, 0] = L
+rec_T.coordinates.data[:, 1] = 0
+rec_term = rec_T.interpolate(expr=TemperaturaVidro)
+
+#Operador
+op = Operator([eqDerivada, eq_1, eq_2, eq_3,
+              eq_entradaAr, eq_17, eq_18,
+              eq_rpsky, eq_rpg, eqCeu,] + rec_term)
+
+op(dt=dt, time=nt-1)
+
+# Plot Configuration
+#==============================================================================
+plt.rc('text' , usetex=False)
+plt.rc('font' , family='serif')
+plt.rc('xtick', labelsize=20)
+plt.rc('ytick', labelsize=20)
+
+plt.plot(time_range.time_values[:-1], rec_T.data[:-1], label=f"Receiver")
+plt.xlabel("Time (s)")
+plt.ylabel("Temperature (K)")
+plt.title("Receiver Data")
+plt.legend()
+plt.grid()
+plt.show()
