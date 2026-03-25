@@ -118,15 +118,15 @@ VelocidadeAr = 0.1468 #Pode ser alterada
 # time grid
 from examples.seismic.source import Receiver, TimeAxis
 t0 = 0 + 60 * 60 * 9
-tn =  60 * 60 * 8/10 + 60 * 60 * 9
-dt = 0.001                     #Devido ao número de Courant, para o sistema entregar valores estável o dt deve estar em um intervalo ótimo
+tn = 60*60*8 + 60 * 60 * 9
+dt = 0.05                     #Devido ao número de Courant, para o sistema entregar valores estável o dt deve estar em um intervalo ótimo
 nt = int((tn-t0)/dt)
 
 time_range = TimeAxis(start=t0,stop=tn,num=nt+1)
 
 # Discretização da malha
 nx = 50  # Número de pontos ao longo de x
-nz = 5   # Número de pontos ao longo de z (resulta em passos de 1mm: 0, 1, 2, 3, 4)
+nz = 3  # Número de pontos ao longo de z (resulta em passos de 1mm: 0, 1, 2, 3, 4)
 
 #Utilização de subdomínios para resolver as condições de contorno
 #z = 0
@@ -168,7 +168,7 @@ TemperaturaVidro = TimeFunction(name='T_g',
                                 grid=grid,
                                 dimensions=(grid.time_dim, x, z),
                                 save=nt+1, shape=(nt+1, nx, nz),
-                                space_order=2)
+                                space_order=3)
 
 TemperaturaPlaca = TimeFunction(name='T_p',
                                 grid=grid,
@@ -179,7 +179,7 @@ TemperaturaPlaca = TimeFunction(name='T_p',
 TemperaturaAr = TimeFunction(name='T_a', grid=grid,
                              dimensions=(grid.time_dim, x),
                              save=nt+1, shape=(nt+1, nx),
-                             space_order=1)
+                             space_order=2)
 
 TemperaturaAmbiente = TimeFunction(name='T_am',                                 #Alteração na função de temperatura para
                                    grid=grid, dimensions=(grid.time_dim,),      #uma função que possui somente dimensão temporal
@@ -189,17 +189,7 @@ TemperaturaAmbiente = TimeFunction(name='T_am',                                 
 TemperaturaCeu = TimeFunction(name='T_ceu',                                 #Alteração na função de temperatura para
                               grid=grid, dimensions=(grid.time_dim,),      #uma função que possui somente dimensão temporal
                               save=nt+1, shape=(nt+1,),
-                              time_order=1)
-
-deltaZ = TimeFunction(name='dZ',
-                  grid=grid,
-                  dimensions=(grid.time_dim, x, z),
-                  save=nt+1, shape=(nt+1, nx, nz),
-                  space_order=2)
-
-deltaZ.data_with_halo[:] = 0
-
-eqDerivada = Eq(deltaZ.forward, TemperaturaVidro.dz.subs(t, t+1))
+                              time_order=3)
 
 eqCeu = Eq(TemperaturaCeu[t+1], 0.0552*pow(TemperaturaAmbiente[t+1], 1.5)) #Passagem de TemperaturaCeu para ser resolvido pelo operador
 
@@ -243,16 +233,15 @@ Nu_gam = 0.86 * pow(Re, 0.5) * pow(Pr, 1/3)
 h_gam = Nu_gam * k_a / L
 
 # Equações Diferenciais
-
 eq11 = Eq(TemperaturaVidro.dt,
-          (k_g/(C_g*ro_g)) * deltaZ.dz #(-2*TemperaturaVidro[t, x, z] + TemperaturaVidro[t,x,z+1] + TemperaturaVidro[t,x,z-1])/(6.4e-7)
+          (k_g/(C_g*ro_g)) * TemperaturaVidro.dz2
           + It_func*alpha_g/(ro_g*C_g*delta_g))
 
 eq12 = Eq(TemperaturaPlaca.dt,
           It_func*tau_g*alpha_p/(ro_p*C_p*l_p)
           + (h_pa/(ro_p*C_p*l_p))*(TemperaturaAr - TemperaturaPlaca)
           - (h_rpsky/(ro_p*C_p*l_p)) * (TemperaturaPlaca - TemperaturaCeu)
-          - (h_rpg/(ro_p*C_p*l_p)) * (TemperaturaPlaca - TemperaturaVidro.subs(z, 0))) #Utiliza-se .subs() pis este é um termo de convecção entre ar e placa e a transferencia ocorre somente naquela espessuara do vidro
+          - (h_rpg/(ro_p*C_p*l_p)) * (TemperaturaPlaca - TemperaturaVidro.subs(z, 0)))
 
 eq13 = Eq(TemperaturaAr.dt,
           (-1) * VelocidadeAr * TemperaturaAr.dxl
@@ -296,10 +285,11 @@ nrec = 1
 rec_T = Receiver(name="rec_T", grid=grid, npoint=nrec, time_range=time_range)
 rec_T.coordinates.data[:, 0] = L
 rec_T.coordinates.data[:, 1] = 0
-rec_term = rec_T.interpolate(expr=TemperaturaVidro)
+rec_term = rec_T.interpolate(expr=(k_g/(C_g*ro_g)) * TemperaturaVidro.dz2
+                                  + It_func*alpha_g/(ro_g*C_g*delta_g))
 
 #Operador
-op = Operator([eqDerivada, eq_1, eq_2, eq_3,
+op = Operator([eq_1, eq_2, eq_3,
               eq_entradaAr, eq_17, eq_18,
               eq_rpsky, eq_rpg, eqCeu,] + rec_term)
 
@@ -313,8 +303,8 @@ plt.rc('xtick', labelsize=20)
 plt.rc('ytick', labelsize=20)
 
 plt.plot(time_range.time_values[:-1], rec_T.data[:-1], label=f"Receiver")
-plt.xlabel("Time (s)")
-plt.ylabel("Temperature (K)")
+plt.xlabel("Tempo (s)")
+plt.ylabel("Valor")
 plt.title("Receiver Data")
 plt.legend()
 plt.grid()
