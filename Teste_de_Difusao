@@ -1,0 +1,129 @@
+import numpy as np
+from devito import *
+import matplotlib.pyplot as plt
+from examples.seismic.source import Receiver, TimeAxis
+
+# Coeficientes do vidro (únicos necessários)
+k_g     = 5.9     # Condutividade Térmica do Vidro (W/m·K)
+C_g     = 753     # Calor específico do vidro (J/kg·K)
+ro_g    = 2466    # Densidade do Vidro (kg/m³)
+delta_g = 4e-3    # Espessura do vidro (m) = 4mm
+L       = 2       # Comprimento do coletor (m) — mantido para definir o grid
+
+# Grade de tempo simplificada
+# Começa do segundo e termina no 30
+t0 = 0
+tn = 30
+dt = 0.001
+nt = int((tn - t0) / dt)
+time_range = TimeAxis(start=t0, stop=tn, num=nt+1)
+
+# Discretização da malha
+# nx=30
+# nz=5: 5 pontos ao longo da espessura do vidro (z = 0, 1, 2, 3, 4 mm)
+nx = 30
+nz = 5
+
+# Subdomínios para as condições de contorno
+class Topo(SubDomain):
+    name = 'topo'
+    def define(self, dimensions):
+        x, z = dimensions
+        return {x: x, z: ('left', 1)}
+
+class Fundo(SubDomain):
+    name = 'fundo'
+    def define(self, dimensions):
+        x, z = dimensions
+        return {x: x, z: ('right', 1)}
+
+
+# Grid 2D
+x = SpaceDimension(name='x')
+z = SpaceDimension(name='z')
+grid = Grid(shape=(nx, nz), extent=(L, delta_g), dimensions=(x, z))
+t    = grid.stepping_dim
+dx, dz = grid.spacing
+
+topo  = Topo(grid=grid)
+fundo = Fundo(grid=grid)
+
+# Temperatura do vidro
+TemperaturaVidro = TimeFunction(name='T_g',
+                                grid=grid,
+                                dimensions=(grid.time_dim, x, z),
+                                save=nt+1, shape=(nt+1, nx, nz),
+                                space_order=2)
+
+# Condição inicial: 308.15 K (35°C) pra ser uniforme em todo o vidro
+TemperaturaVidro.data_with_halo[:] = 308.15
+
+# Temperaturas fixas nas bordas (substituem h_ga e h_gam)
+# T_quente → borda interna (z=0mm), mais quente
+# T_fria   → borda externa (z=4mm), temperatura ambiente
+T_quente = 320.00   # K
+T_fria   = 308.15   # K
+
+# Equação diferencial com difusão apenas
+# Eq 11 do artigo sem o termo de radiação
+eq11 = Eq(TemperaturaVidro.dt,
+          (k_g / (C_g * ro_g)) * TemperaturaVidro.dz2)
+
+eq_1 = Eq(TemperaturaVidro.forward,
+          solve(eq11, TemperaturaVidro.forward))
+
+
+# Condições de contorno: temperaturas fixas nas bordas 
+# Em vez de usar h_ga e h_gam, simplesmente fixamos as temperaturas
+eq_topo  = Eq(TemperaturaVidro.forward, T_quente, subdomain=topo)
+eq_fundo = Eq(TemperaturaVidro.forward, T_fria,   subdomain=fundo)
+
+
+# Recebedor no centro do vidro (z = 2mm)
+# Aqui medimos como a temperatura evolui ao longo do tempo
+nrec = 1
+rec_T = Receiver(name="rec_T", grid=grid, npoint=nrec, time_range=time_range)
+rec_T.coordinates.data[:, 0] = L / 2        # meio em x
+rec_T.coordinates.data[:, 1] = delta_g / 2  # z = 2mm (centro do vidro)
+rec_term = rec_T.interpolate(expr=TemperaturaVidro)
+
+
+# Operador: só equação do vidro e condições de contorno
+op = Operator([eq_1, eq_topo, eq_fundo] + rec_term)
+op(dt=dt, time=nt-1)
+
+
+# Gráfico 1: Temperatura no centro ao longo do tempo
+# O valor esperado em regime permanente é (320 + 308.15) / 2 = 314.075 K
+# Se o Devito estiver certo, a curva deve convergir para essa linha vermelha
+T_analitica_centro = (T_quente + T_fria) / 2  # = 314.075 K
+
+plt.figure(figsize=(10, 5))
+plt.plot(time_range.time_values[:-1], rec_T.data[:-1],
+         label="Devito — centro do vidro (z=2mm)")
+plt.axhline(y=T_analitica_centro, color='r', linestyle='--',
+            label=f"Solução analítica = {T_analitica_centro:.3f} K")
+plt.xlabel("Tempo (s)")
+plt.ylabel("Temperatura (K)")
+plt.title("Difusão de calor no vidro — equação simplificada")
+plt.legend()
+plt.grid()
+plt.show()
+
+
+# Gráfico 2: Perfil de temperatura ao longo da espessura no instante final
+# A solução analítica em regime permanente é um perfil LINEAR
+# de 320K (z=0) até 308.15K (z=4mm)
+z_mm       = np.linspace(0, delta_g * 1000, nz)          # eixo z em milímetros
+T_devito   = TemperaturaVidro.data[-1, 0, :]              # último instante, x=0
+T_linear   = np.linspace(T_quente, T_fria, nz)           # perfil linear esperado
+
+plt.figure(figsize=(8, 5))
+plt.plot(z_mm, T_devito, 'bo-', label="Devito (t = 30s)")
+plt.plot(z_mm, T_linear, 'r--', label="Analítica (perfil linear esperado)")
+plt.xlabel("Espessura do vidro (mm)")
+plt.ylabel("Temperatura (K)")
+plt.title("Perfil de temperatura no vidro ao final da simulação")
+plt.legend()
+plt.grid()
+plt.show()
