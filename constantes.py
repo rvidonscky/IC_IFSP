@@ -62,3 +62,7 @@ else:
 
 h_ga = Nu * k_a / L
 h_pa = h_ga
+
+
+Nu_gam = 0.86 * pow(Re, 0.5) * pow(Pr, 1/3)
+h_gam = Nu_gam * k_a / L
