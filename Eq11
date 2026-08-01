@@ -100,7 +100,7 @@ alpha_g = 0.1     # Absortividade optica do vidro (?)
 t0 = 6 * 3600
 tn = 18 * 3600
 dt = 0.1 
-nt = int((tn - t0) / dt0)
+nt = int((tn - t0) / dt)
 time_range = TimeAxis(start=t0, stop=tn, num=nt+1)
 
 # Discretização da malha
@@ -215,7 +215,7 @@ rec_term = rec_T.interpolate(expr=TemperaturaVidro)
 
 op = Operator([eq_topo, eq_1, eq_fundo] + rec_term)
 
-op(dt=dt0, time_M=nt-1)
+op(dt=dt, time_M=nt-1)
 
 horas_eixo_x = segundos_do_dia / 3600.0
 
